@@ -133,10 +133,42 @@ class NsisUpdater extends (_AppUpdater || _load_AppUpdater()).AppUpdater {
                 return null;
             }
             return yield new (_bluebirdLst2 || _load_bluebirdLst2()).default(function (resolve, reject) {
-                // XXX!!! Temporary measure.
-                // Disable signature verification to fix updates until we figure out
-                // why it doesn't work properly. Urrrrggh.
-                resolve(true);
+                (0, (_child_process || _load_child_process()).execFile)("powershell.exe", [`Get-AuthenticodeSignature '${tempUpdateFile}' | ConvertTo-Json -Compress`], { maxBuffer: 4 * 1024000, timeout: 60 * 1000 }, function (error, stdout, stderr) {
+                    if (error != null) {
+                        reject(error);
+                        return;
+                    }
+                    if (stderr) {
+                        reject(new Error(`Cannot execute Get-AuthenticodeSignature: ${stderr}`));
+                        return;
+                    }
+                    const data = JSON.parse(stdout);
+                    delete data.PrivateKey;
+                    delete data.IsOSBinary;
+                    delete data.SignatureType;
+                    const signerCertificate = data.SignerCertificate;
+                    if (signerCertificate != null) {
+                        delete signerCertificate.Archived;
+                        delete signerCertificate.Extensions;
+                        delete signerCertificate.Handle;
+                        delete signerCertificate.HasPrivateKey;
+                        // duplicates data.SignerCertificate (contains RawData)
+                        delete signerCertificate.SubjectName;
+                    }
+                    delete data.Path;
+                    if (data.Status === 0) {
+                        const name = (0, (_rfc2253Parser || _load_rfc2253Parser()).parseDn)(data.SignerCertificate.Subject).get("CN");
+                        if ((Array.isArray(publisherName) ? publisherName : [publisherName]).indexOf(name) !== -1) {
+                            resolve(null);
+                            return;
+                        }
+                    }
+                    const result = JSON.stringify(data, function (name, value) {
+                        return name === "RawData" ? undefined : value;
+                    }, 2);
+                    _this2._logger.info(`Sign verification failed, installer signed with incorrect certificate: ${result}`);
+                    resolve(result);
+                });
             });
         })();
     }
